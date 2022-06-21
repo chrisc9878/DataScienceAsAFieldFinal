@@ -1,0 +1,179 @@
+---
+title: "Reproducible Report on COVID19 Data"
+author: "Christopher Chery"
+date: '2022-06-15'
+output:
+  pdf_document: default
+  html_document: default
+---
+>Project Instructions: Import, tidy and analyze the COVID19 dataset from the Johns Hopkins github site. This is the same dataset I used in class. Feel free to repeat and reuse what I did if you want to. Be sure your project is reproducible and contains some visualization and analysis that is unique to your project. You may use the data to do any analysis that is of interest to you. You should include at least two visualizations and one model.  Be sure to identify any bias possible in the data and in your analysis.
+
+
+```{r library, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(dplyr)
+```
+
+
+```{r get_covid19_data, echo=FALSE}
+data_url <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+
+file_names <- c("time_series_covid19_confirmed_global.csv",
+                "time_series_covid19_deaths_global.csv",
+                "time_series_covid19_confirmed_US.csv", 
+                "time_series_covid19_deaths_US.csv")
+
+urls <- str_c(data_url, file_names)
+urls
+```
+ 
+```{r read in datasets, echo=FALSE}
+global_cases <- read_csv(urls[1])
+global_deaths <- read_csv(urls[2])
+US_cases <- read_csv(urls[3])
+US_deaths <- read_csv(urls[4]) 
+```
+
+```{r tidy datasets, echo=FALSE}
+global_cases <- global_cases %>%
+  pivot_longer(cols =
+                 -c('Province/State',
+                    'Country/Region', Lat, Long),
+               names_to = "date",
+               values_to = "cases")
+global_cases
+
+global_deaths <- global_deaths %>%
+  pivot_longer(cols =
+                 -c('Province/State',
+                    'Country/Region', Lat, Long),
+               names_to = "date",
+               values_to = "deaths")
+global_deaths
+
+US_cases <- US_cases %>%
+  pivot_longer(cols = -(UID:Combined_Key),
+               names_to = "date",
+               values_to = "cases")  %>%
+  select(Admin2:cases) %>%
+  mutate(date = mdy(date)) %>%
+  select (-c(Lat, Long_))
+US_cases
+
+US_deaths <- US_deaths %>%
+  pivot_longer(cols = -(UID:Population),
+               names_to = "date",
+               values_to = "deaths")  %>%
+  select(Admin2:deaths) %>%
+  mutate(date = mdy(date)) %>%
+  select (-c(Lat, Long_))
+US_deaths
+```
+
+```{r join corresponding cases/deaths, echo=FALSE}
+global <- global_cases %>%
+  full_join(global_deaths) %>%
+  rename(Country_Region = 'Country/Region',
+         Province_State = 'Province/State') %>%
+  mutate(date = mdy(date))
+global
+
+US <- US_cases %>%
+  full_join(US_deaths)
+US
+```
+
+```{r summary, echo=FALSE}
+summary(global)
+summary(US)
+```
+
+```{r get US data to analyze/plot, echo=FALSE}
+US_by_state <- US %>%
+  group_by(Province_State, Country_Region, date) %>%
+  summarize(
+    cases = sum(cases),
+    deaths = sum(deaths),
+    Population = sum(Population)
+  ) %>%
+  mutate(deaths_per_mill = deaths * 1000000 / Population) %>%
+  select(Province_State, Country_Region, date, cases, deaths, deaths_per_mill,
+        Population) %>%
+  ungroup()
+
+US_totals <- US_by_state %>%
+  group_by(Country_Region, date) %>%
+  summarize(
+    cases = sum(cases),
+    deaths = sum(deaths),
+    Population = sum(Population)
+  ) %>%
+  mutate(deaths_per_mill = deaths * 1000000 / Population) %>%
+  select(Country_Region, date, cases, deaths) %>%
+  ungroup()
+
+US_state_totals <- US_by_state %>%
+  group_by(Province_State) %>%
+  summarize(
+    deaths = max(deaths),
+    cases = max(cases),
+    population = max(Population),
+    cases_per_thousand = 1000 * cases / population,
+    death_per_thousand = 1000 * deaths / population
+  ) %>%
+  filter(cases > 0, population > 0)
+US_state_totals %>%
+  slice_min(death_per_thousand, n = 10)
+US_state_totals %>%
+  select(death_per_thousand, cases_per_thousand, everything())
+
+mod <- lm(death_per_thousand ~ cases_per_thousand, data = US_state_totals)
+
+mod2 <- lm(death_per_thousand ~ cases_per_thousand + population, data = US_state_totals)
+```
+
+```{r plots and linear model, echo=FALSE}
+US_totals %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases")) +
+  geom_point(aes(color = "cases")) +
+  geom_line(aes(y = deaths, color = "deaths")) +
+  geom_point(aes(y = deaths, color = "deaths")) +
+  scale_y_log10() +
+  theme(legend.position = "right",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID-19 in the US", y = "Total", x = "Date")
+
+US_by_state %>%
+  filter(Province_State == "Florida") %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases")) +
+  geom_point(aes(color = "cases")) +
+  geom_line(aes(y = deaths, color = "deaths")) +
+  geom_point(aes(y = deaths, color = "deaths")) +
+  scale_y_log10() +
+  theme(legend.position = "right",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in Florida", y = "Total")
+
+US_total_w_pred <- US_state_totals %>%
+  mutate(pred = predict(mod), pred2 = predict(mod2), std_ratio = ((death_per_thousand / cases_per_thousand) - (mean(death_per_thousand) / mean(cases_per_thousand))) / sd(death_per_thousand / cases_per_thousand))
+US_total_w_pred
+US_total_w_pred %>%
+  ggplot() +
+  geom_point(aes(x = cases_per_thousand, y = death_per_thousand), color = "blue") +
+  geom_point(aes(x = cases_per_thousand, y = pred), color = "red") +
+  geom_point(aes(x = cases_per_thousand, y = pred2), color = "green")
+```
+
+## Conclusion and Bias Identification
+>Covid 19 had a major impact on the world since 2020. A lot of panic ensued on how contagious the virus was and how the population of an area can be affected by the rising case count. With many different countries around the world implementing covid restrictions to combat the spread of the virus through lockdowns or mandatory quarantines there were signs that these actions slowed down the new case count. Remarkable in less than a year a vaccine was created that has ~ 90% efficacy against the virus and that became the start of life after the pandemic. The potential for bias in this data collection would be how states report there covid cases and deaths; many states were highlighted by the news on how they under reported cases/deaths to favor the next US election cycle of 2020. Another bias comes from when people are taking a covid test, where they having symptoms before or could they be asymptomatic? There was also a testing shortage early on the pandemic and around big holiday travel weekends which led to a lot of unknown positive test cases going unrecorded. There is also bias in my analysis of how I chose to focus on the US covid data. I felt more attached to the US covid data as that is my country of origin and had firsthand experiences with the testing shortages, rising case counts from my home state of Florida and going through the vaccine process. 
+
+## R Session Info  
+```{r echo=FALSE}
+utils::sessionInfo()
+```
