@@ -1,0 +1,96 @@
+---
+title: "NYPD Shooting Incident Data (Historic)"
+author: "Christopher Chery"
+date: '2022-05-26'
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+>The data being used for this report is of a list of every shooting incident that occurred in New York City going back to 2006 through the end of the previous calendar year. This data is manually extracted every quarter and reviewed by a 3rd party before being posted on the NYPD website
+
+# Table of Contents
+1. Summary of Data
+2. Tidy/Transform Data
+3. Visualizations
+4. Bias Identification & Data Analysis
+5. Session Info 
+
+```{r library in needed pacakage, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(lubridate)
+```
+
+### 1. Summary of Data
+```{r load in data from .csv link, echo=FALSE}
+data = read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+head(data)
+
+summary(data)
+```
+
+### 2. Tidy and Transform Data
+```{r select approiate columns for data analysis, echo=FALSE}
+summary(data)
+useful_data = data %>% select(INCIDENT_KEY, OCCUR_DATE, OCCUR_TIME, BORO, STATISTICAL_MURDER_FLAG, PERP_AGE_GROUP,PERP_SEX, PERP_RACE, VIC_AGE_GROUP, VIC_SEX, VIC_RACE, Latitude, Longitude)
+```
+
+```{r tidy_transform_data, echo=FALSE}
+useful_data = useful_data %>% 
+  replace_na(list(PERP_AGE_GROUP = "Unknown", PERP_SEX = "Unknown", PERP_RACE = "Unknown"))
+
+# Get rid of data that is out of range/not needed
+useful_data = subset(useful_data, PERP_AGE_GROUP!="1020" & PERP_AGE_GROUP!="224" & PERP_AGE_GROUP!="940")
+useful_data$PERP_AGE_GROUP = recode(useful_data$PERP_AGE_GROUP, UNKNOWN = "Unknown")
+
+# Changing appropriate variables to factor data type 
+useful_data$PERP_SEX = recode(useful_data$PERP_SEX, U = "Unknown")
+useful_data$PERP_RACE = recode(useful_data$PERP_RACE, UNKNOWN = "Unknown")
+useful_data$VIC_SEX   = recode(useful_data$VIC_SEX, U = "Unknown")
+useful_data$VIC_RACE   = recode(useful_data$VIC_RACE, UNKNOWN = "Unknown")
+useful_data$INCIDENT_KEY = as.character(useful_data$INCIDENT_KEY)
+useful_data$BORO = as.factor(useful_data$BORO)
+useful_data$PERP_AGE_GROUP = as.factor(useful_data$PERP_AGE_GROUP)
+useful_data$PERP_SEX = as.factor(useful_data$PERP_SEX)
+useful_data$PERP_RACE = as.factor(useful_data$PERP_RACE)
+useful_data$VIC_AGE_GROUP = as.factor(useful_data$VIC_AGE_GROUP)
+useful_data$VIC_SEX = as.factor(useful_data$VIC_SEX)
+useful_data$VIC_RACE = as.factor(useful_data$VIC_RACE)
+
+# Return summary of tidy/transformed data
+summary(useful_data)
+```
+
+### 3. Visualizations 
+```{r plots, echo=FALSE}
+incident_count_graph <- ggplot(useful_data, aes(x = BORO)) +
+  geom_bar() +
+  labs(title = "Incident count of NYPD", x = " New York City Boros", y = "Incident Count") +
+  theme_light()
+incident_count_graph
+
+useful_data$OCCUR_HOUR = hour(hms(as.character(useful_data$OCCUR_TIME)))
+
+hour_count = useful_data %>%
+  group_by(OCCUR_HOUR) %>%
+  count()
+
+incident_hour_graph <- ggplot(hour_count, aes(x = OCCUR_HOUR, y = n)) +
+  geom_line() +
+  labs(title = "24-hour outlook on incident occurences", x = "Incident occurence by hour", y = "Count of Incidents") + theme_light()
+incident_hour_graph
+```
+
+### 4. Bias Identification & Data Analysis
+
+>With this data report on NYPD shootings, there can be a bias towards a certain age and race group when it comes to the incident count and where the incident took place. Being a young black man myself and seeing the news coverage across the US over the last decade of other young black men being mistreated by law enforcement can put the bias in me that the "protect and serve" only applies to people of certian race or socioeconomical backgrounds. In my case to mitigate this bias I need create a hypohthesis and must stricly adhere to the data and scientific process that I have been provided to draw any conclusions from. With this report, I have been able to draw a few conclusions free of bias: Staten Island is the safest of all boros, the boro with most incident count on record is Brooklyn, most crimes are committed by males and the victims of these crimes tends to be females, most incidents take place during the late night hours of 8pm - 4am.
+
+### 5. Session Info  
+```{r echo=FALSE}
+utils::sessionInfo()
+```
+
